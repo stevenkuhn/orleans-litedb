@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_NOLOGO: true
+
+jobs:
+  push_to_nuget:
+    name: Push to NuGet Feed
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Source
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+        ref: ${{ github.event.release.target_commitish }}
+
+    - name: Download release assets
+      uses: Itsblue/download-release-assets-action@master
+      with:
+        repo: ${{ github.repository }}
+        version: ${{ github.event.release.id }}
+        file: "Sknet.*"
+        path: ./artifacts
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Push assets to NuGet 
+      run: >
+        ./build.sh
+        --target PublishToNuGetFeed
+        --skip PublishArtifacts
+        --nuget-api-key ${{ secrets.NUGET_APIKEY }}
+        --nuget-source ${{ secrets.NUGET_SOURCE }}

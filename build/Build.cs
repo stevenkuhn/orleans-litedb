@@ -1,36 +1,23 @@
-using System;
-using System.Linq;
-using Nuke.Common;
-using Nuke.Common.CI;
-using Nuke.Common.Execution;
-using Nuke.Common.IO;
-using Nuke.Common.ProjectModel;
-using Nuke.Common.Tooling;
-using Nuke.Common.Utilities.Collections;
-using static Nuke.Common.EnvironmentInfo;
-using static Nuke.Common.IO.FileSystemTasks;
-using static Nuke.Common.IO.PathConstruction;
-
+[ShutdownDotNetAfterServerBuild]
 class Build : NukeBuild
 {
-    /// Support plugins are available for:
-    ///   - JetBrains ReSharper        https://nuke.build/resharper
-    ///   - JetBrains Rider            https://nuke.build/rider
-    ///   - Microsoft VisualStudio     https://nuke.build/visualstudio
-    ///   - Microsoft VSCode           https://nuke.build/vscode
-
-    public static int Main () => Execute<Build>(x => x.Compile);
+    public static int Main() => Execute<Build>(x => x.Compile);
 
     [Parameter("Configuration to build - Default is 'Debug' (local) or 'Release' (server)")]
     readonly Configuration Configuration = IsLocalBuild ? Configuration.Debug : Configuration.Release;
 
     [Parameter("GitHub access token used for creating a new or updating an existing release.")]
+    [Secret]
     readonly string GitHubAccessToken;
 
-    [Parameter("NuGet source used for pushing the Sdk NuGet package. Default is NuGet.org.")]
+    [Parameter("GitHub repository owner and name used for creating a new or updating an existing release. For example: 'stevenkuhn/orleans-litedb'.")]
+    readonly string GitHubRepository = "stevenkuhn/orleans-litedb";
+
+    [Parameter("NuGet source used for pushing the NuGet package. Default is NuGet.org.")]
     readonly string NuGetSource = "https://api.nuget.org/v3/index.json";
 
-    [Parameter("NuGet API key used to pushing the Sdk NuGet package.")]
+    [Parameter("NuGet API key used to pushing the NuGet package.")]
+    [Secret]
     readonly string NuGetApiKey;
 
     [Solution] readonly Solution Solution;
@@ -40,9 +27,6 @@ class Build : NukeBuild
     static AbsolutePath SourceDirectory => RootDirectory / "src";
     static AbsolutePath TestsDirectory => RootDirectory / "test";
     static AbsolutePath ArtifactsDirectory => RootDirectory / "artifacts";
-
-    const string GitHubRepositoryName = "InRuleGitStorage";
-    const string GitHubRepositoryOwner = "orleans-litedb";
 
     readonly string[] NuGetRestoreSources = new[] {
         "https://api.nuget.org/v3/index.json"
@@ -69,6 +53,7 @@ class Build : NukeBuild
         });
 
     Target Restore => _ => _
+        .DependsOn(Clean)
         .Executes(() =>
         {
             Log.Debug("Restoring NuGet packages for solution...");
@@ -94,4 +79,120 @@ class Build : NukeBuild
                 .EnableNoRestore());
         });
 
+    Target Test => _ => _
+        .DependsOn(Compile)
+        .Executes(() =>
+        {
+            Log.Debug("Running tests for solution...");
+            DotNetTest(s => s
+                .SetProjectFile(Solution)
+                .SetConfiguration(Configuration)
+                .EnableNoBuild()
+                .EnableNoRestore());
+        });
+
+    Target PublishArtifacts => _ => _
+        .DependsOn(Compile)
+        .After(Test)
+        .Executes(() =>
+        {
+            Log.Debug("Publishing artifacts to the artifacts folder...");
+            SourceDirectory
+                .GlobFiles($"**/{Configuration}/**/Sknet.*.{GitVersion.SemVer}.*nupkg")
+                .ForEach(file => CopyFileToDirectory(file, ArtifactsDirectory));
+        });
+
+    Target PublishToGitHub => _ => _
+        .DependsOn(PublishArtifacts)
+        .Requires(() => GitHubAccessToken)
+        .Requires(() => GitHubRepository)
+        .Executes(async () =>
+        {
+            Log.Debug($"Creating 'v{GitVersion.SemVer}' release in GitHub...");
+            (string repositoryOwner, string repositoryName) = GitHubRepository.Split('/');
+
+            var github = new Octokit.GitHubClient(new Octokit.ProductHeaderValue("sknet.orleans.litedb.build"))
+            {
+                Credentials = new Octokit.Credentials(GitHubAccessToken)
+            };
+
+            Octokit.Release release = null;
+            try
+            {
+                Log.Information($"Retrieving existing release tagged as 'v{GitVersion.SemVer}'...");
+                release = await github.Repository.Release.Get(repositoryOwner, repositoryName, $"v{GitVersion.SemVer}");
+            }
+            catch (Octokit.NotFoundException)
+            {
+                Log.Information("Release not found. Retrieving existing draft release...");
+                var releases = await github.Repository.Release.GetAll(repositoryOwner, repositoryName);
+                release = releases.SingleOrDefault(r => r.Draft && (r.TagName == $"v{GitVersion.SemVer}" || r.TagName.StartsWith($"v{GitVersion.MajorMinorPatch}-{GitVersion.PreReleaseLabel}")));
+            }
+
+            if (release != null)
+            {
+                Log.Information($"Release '{release.Name}' found. Updating release...");
+                release = await github.Repository.Release.Edit(repositoryOwner, repositoryName, release.Id, new Octokit.ReleaseUpdate
+                {
+                    Name = $"v{GitVersion.SemVer}",
+                    TagName = $"v{GitVersion.SemVer}",
+                    Body = !string.IsNullOrWhiteSpace(release.Body)
+                        ? release.Body
+                        : $"Release notes for `v{GitVersion.SemVer}` are not available at this time.",
+                    Draft = release.Draft,
+                    Prerelease = !string.IsNullOrWhiteSpace(GitVersion.PreReleaseTag),
+                    TargetCommitish = GitRepository.Commit
+                });
+            }
+            else
+            {
+                Log.Information($"Release not found. Creating a new draft release...");
+                release = await github.Repository.Release.Create(repositoryOwner, repositoryName, new Octokit.NewRelease($"v{GitVersion.SemVer}")
+                {
+                    Name = $"v{GitVersion.SemVer}",
+                    Body = $"Release notes for `v{GitVersion.SemVer}` are not available at this time.",
+                    Draft = true,
+                    Prerelease = !string.IsNullOrWhiteSpace(GitVersion.PreReleaseTag),
+                    TargetCommitish = GitRepository.Commit
+                });
+            }
+
+            Log.Information("Removing existing assets (if any)...");
+            var assets = await github.Repository.Release.GetAllAssets(repositoryOwner, repositoryName, release.Id);
+            foreach (var asset in assets)
+            {
+                await github.Repository.Release.DeleteAsset(repositoryOwner, repositoryName, asset.Id);
+            }
+
+            var artifacts = ArtifactsDirectory.GlobFiles($"Sknet.*.{GitVersion.SemVer}.*");
+            foreach (var artifact in artifacts)
+            {
+                var file = new FileInfo(artifact);
+                using var stream = File.OpenRead(artifact);
+
+                Log.Information($"Uploading asset '{file.Name}'...");
+                var asset = await github.Repository.Release.UploadAsset(release, new Octokit.ReleaseAssetUpload()
+                {
+                    ContentType = "application/zip",
+                    FileName = file.Name,
+                    RawData = stream,
+                });
+            }
+        });
+
+    Target PublishToNuGetFeed => _ => _
+        .DependsOn(PublishArtifacts)
+        .Requires(() => NuGetSource)
+        .Requires(() => NuGetApiKey)
+        .After(PublishToGitHub)
+        .Executes(() =>
+        {
+            Log.Debug($"Uploading NuGet package(s) to '{NuGetSource}'...");
+
+            DotNetNuGetPush(s => s
+                .SetApiKey(NuGetApiKey)
+                .SetSkipDuplicate(true)
+                .SetSource(NuGetSource)
+                .SetTargetPath(ArtifactsDirectory / $"Sknet.*.{GitVersion.SemVer}.nupkg"));
+        });
 }

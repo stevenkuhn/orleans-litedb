@@ -20,7 +20,12 @@
         },
         "GitHubAccessToken": {
           "type": "string",
-          "description": "GitHub access token used for creating a new or updating an existing release"
+          "description": "GitHub access token used for creating a new or updating an existing release",
+          "default": "Secrets must be entered via 'nuke :secrets [profile]'"
+        },
+        "GitHubRepository": {
+          "type": "string",
+          "description": "GitHub repository owner and name used for creating a new or updating an existing release. For example: 'stevenkuhn/orleans-litedb'"
         },
         "Help": {
           "type": "boolean",
@@ -53,11 +58,12 @@
         },
         "NuGetApiKey": {
           "type": "string",
-          "description": "NuGet API key used to pushing the Sdk NuGet package"
+          "description": "NuGet API key used to pushing the NuGet package",
+          "default": "Secrets must be entered via 'nuke :secrets [profile]'"
         },
         "NuGetSource": {
           "type": "string",
-          "description": "NuGet source used for pushing the Sdk NuGet package. Default is NuGet.org"
+          "description": "NuGet source used for pushing the NuGet package. Default is NuGet.org"
         },
         "Partition": {
           "type": "string",
@@ -86,7 +92,11 @@
             "enum": [
               "Clean",
               "Compile",
-              "Restore"
+              "PublishArtifacts",
+              "PublishToGitHub",
+              "PublishToNuGetFeed",
+              "Restore",
+              "Test"
             ]
           }
         },
@@ -102,7 +112,11 @@
             "enum": [
               "Clean",
               "Compile",
-              "Restore"
+              "PublishArtifacts",
+              "PublishToGitHub",
+              "PublishToNuGetFeed",
+              "Restore",
+              "Test"
             ]
           }
         },
