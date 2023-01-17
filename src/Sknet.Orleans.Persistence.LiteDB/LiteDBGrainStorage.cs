@@ -11,59 +11,60 @@ public class LiteDBGrainStorage : IGrainStorage
         _database = database;
     }
 
-    public Task ClearStateAsync(string grainType, GrainReference grainReference, IGrainState grainState)
+    public Task ClearStateAsync<T>(string stateName, GrainId grainId, IGrainState<T> grainState)
     {
-        var documentId = GetDocumentId(grainReference);
-        var collectionName = _database.Mapper.ResolveCollectionName(grainState.Type);
+        //var documentId = GetDocumentId(grainReference);
+        //var collectionName = _database.Mapper.ResolveCollectionName(typeof(T));
 
-        var collection = _database.GetCollection(collectionName);
+        //var collection = _database.GetCollection(collectionName);
 
-        collection.Delete(documentId);
+        //collection.Delete(documentId);
 
         return Task.CompletedTask;
     }
 
-    public Task ReadStateAsync(string grainType, GrainReference grainReference, IGrainState grainState)
+    public Task ReadStateAsync<T>(string stateName, GrainId grainId, IGrainState<T> grainState)
     {
-        var documentId = GetDocumentId(grainReference);
-        var collectionName = _database.Mapper.ResolveCollectionName(grainState.Type);
+        //var documentId = GetDocumentId(grainReference);
+        //var collectionName = _database.Mapper.ResolveCollectionName(typeof(T));
 
-        var collection = _database.GetCollection(collectionName);
-        var document = collection.FindById(documentId);
+        //var collection = _database.GetCollection(collectionName);
+        //var document = collection.FindById(documentId);
 
-        if (document == null)
-        {
-            grainState.ETag = null;
-            grainState.RecordExists = false;
-            grainState.State = null;
+        //if (document == null)
+        //{
+        //    grainState.ETag = null;
+        //    grainState.RecordExists = false;
+        //    grainState.State = default;
 
-            return Task.CompletedTask;
-        }
+        //    return Task.CompletedTask;
+        //}
 
-        var state = _database.Mapper.ToObject(grainState.Type, document);
+        //var state = _database.Mapper.ToObject<T>(document);
 
-        grainState.ETag = null;
-        grainState.RecordExists = true;
-        grainState.State = state;
+        //grainState.ETag = null;
+        //grainState.RecordExists = true;
+        //grainState.State = state;
 
         return Task.CompletedTask;
     }
 
-    public Task WriteStateAsync(string grainType, GrainReference grainReference, IGrainState grainState)
+    public Task WriteStateAsync<T>(string stateName, GrainId grainId, IGrainState<T> grainState)
     {
-        var documentId = GetDocumentId(grainReference);
-        var collectionName = _database.Mapper.ResolveCollectionName(grainState.Type);
+        //var documentId = GetDocumentId(grainReference);
+        //var collectionName = _database.Mapper.ResolveCollectionName(typeof(T));
 
-        var collection = _database.GetCollection(collectionName);
-        var document = _database.Mapper.ToDocument(grainState.Type, grainState.State);
+        //var collection = _database.GetCollection(collectionName);
+        //var document = _database.Mapper.ToDocument(grainState.State);
 
-        collection.Upsert(documentId, document);
+        //collection.Upsert(documentId, document);
 
-        grainState.ETag = null;
-        grainState.RecordExists = true;
+        //grainState.ETag = null;
+        //grainState.RecordExists = true;
 
         return Task.CompletedTask;
     }
+
 
     private BsonValue GetDocumentId(GrainReference grainReference)
     {
